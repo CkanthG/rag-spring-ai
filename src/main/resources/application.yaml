@@ -26,3 +26,8 @@ spring:
         dimensions: 768
         index-type: HNSW
         distance-type: COSINE_DISTANCE
+
+logging:
+  level:
+    org.springframework.ai.chat.client.advisor: DEBUG
+    org.springframework.ai.vectorstore: DEBUG

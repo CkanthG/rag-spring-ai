@@ -1,116 +1,173 @@
 # RAG Spring AI
 
-A Kotlin + Spring Boot RAG (Retrieval-Augmented Generation) application using:
-- Ollama for LLM + embeddings
-- PostgreSQL + PGVector for vector storage
-- Spring AI `QuestionAnswerAdvisor` for retrieval grounding
+A Kotlin + Spring Boot Retrieval-Augmented Generation (RAG) service built with Spring AI.
+
+It uses:
+- **Ollama** for chat completion and embeddings
+- **PostgreSQL + PGVector** for vector storage
+- **Spring AI** for vector search, retrieval grounding, and tool-enabled chat
 
 ## What this app does
 
-1. Ingests PDF and text files and stores vector embeddings.
-2. Retrieves relevant chunks from PGVector.
-3. Answers questions using retrieved context.
+1. Accepts PDF and text-based files through an upload API.
+2. Extracts and splits document content into chunks.
+3. Stores embeddings in PGVector.
+4. Answers questions in two modes:
+   - **Strict RAG**: retrieves document context and grounds the answer in it.
+   - **Agent mode**: allows the model to decide when to use tools, including knowledge-base search.
 
 ## Tech stack
 
 - Java 21
-- Kotlin 2.2.x
-- Spring Boot 4.0.x
-- Spring AI 2.0.x
+- Kotlin 2.2.21
+- Spring Boot 4.0.7
+- Spring AI 2.0.0
 - Apache PDFBox 3.0.3
-- PostgreSQL (`pgvector/pgvector:pg17`)
-- Ollama (`ollama/ollama:latest`)
+- PostgreSQL with `pgvector/pgvector:pg17`
+- Ollama with `ollama/ollama:latest`
+
+## Project flow
+
+### Ingestion flow
+
+- `POST /api/v1/documents/ingest`
+- Supports:
+  - PDF: `application/pdf`, `.pdf`
+  - Text: `text/*`, `.txt`, `.md`, `.markdown`, `.csv`, `.log`
+- PDFs are parsed with PDFBox.
+- Text files are read directly.
+- Documents are split with Spring AI's `TokenTextSplitter`.
+- Chunks are embedded and stored in PGVector with source metadata.
+
+### Question answering flow
+
+- `POST /api/v1/chat/ask`
+  - Uses `QuestionAnswerAdvisor` with vector search.
+  - Current retrieval settings: `topK=3`, `similarityThreshold=0.0`.
+- `POST /api/v1/chat/agent`
+  - Uses the same model with tool access enabled.
+  - The model can call built-in tools such as knowledge-base search and business-day calculation.
+
+## Built-in tools available to the agent
+
+The agent-enabled endpoint can use these tools:
+
+- `getCurrentDate()`
+- `searchKnowledgeBase(query)`
+- `calculateBusinessDays(startDate, endDate)`
 
 ## Prerequisites
 
-- Docker + Docker Compose
 - Java 21
-- (Optional) `curl` for API testing
+- Docker Desktop or Docker Engine with Compose support
+- Internet access for pulling container images and Ollama models on first run
+- Optional: `curl` / `curl.exe` or Postman for API testing
 
-## Configuration notes
+## Configuration
 
 Current defaults in `src/main/resources/application.yaml`:
-- `spring.docker.compose.enabled: false`
-  - The app **does not auto-start Docker Compose**. Start containers manually.
-- Chat model: `llama3.2:1b`
-- Embedding model: `nomic-embed-text`
-- DB URL: `jdbc:postgresql://localhost:5432/ragdb`
 
-## 1) Start dependencies
+| Property | Value |
+| --- | --- |
+| `spring.docker.compose.enabled` | `false` |
+| `spring.datasource.url` | `jdbc:postgresql://localhost:5432/ragdb` |
+| `spring.datasource.username` | `postgres` |
+| `spring.datasource.password` | `password` |
+| `spring.ai.ollama.base-url` | `http://localhost:11434` |
+| Chat model | `llama3.2:1b` |
+| Embedding model | `nomic-embed-text` |
+| PGVector dimensions | `768` |
+| PGVector index type | `HNSW` |
+| PGVector distance type | `COSINE_DISTANCE` |
 
-From project root:
+### Important note about Docker Compose
 
-```bash
-cd /home/devansh/rag-spring-ai
-docker-compose up -d
+`spring.docker.compose.enabled` is set to `false`, so the application **does not auto-start containers**. Start dependencies yourself before launching the app.
+
+## Local development setup
+
+### 1) Start dependencies
+
+From the project root:
+
+```powershell
+docker compose up -d
 ```
 
-Check services:
+Check service status:
 
-```bash
-docker-compose ps
+```powershell
+docker compose ps
 ```
 
-Expected mapped ports from `compose.yaml`:
+Expected ports from `compose.yaml`:
 - Ollama: `11434`
-- PostgreSQL: `5432`
+- PostgreSQL / PGVector: `5432`
 
-## 2) Pull Ollama models (first run)
+### 2) Pull Ollama models on first run
 
-```bash
-docker-compose exec -T ollama ollama pull llama3.2:1b
-docker-compose exec -T ollama ollama pull nomic-embed-text
+```powershell
+docker compose exec -T ollama ollama pull llama3.2:1b
+docker compose exec -T ollama ollama pull nomic-embed-text
 ```
 
-Optional health check:
+Optional Ollama health check:
 
-```bash
-curl -s http://localhost:11434/api/tags
+```powershell
+curl.exe http://localhost:11434/api/tags
 ```
 
-## 3) Run the app
+### 3) Run the application
+
+On Windows:
+
+```powershell
+.\gradlew.bat bootRun
+```
+
+On macOS / Linux:
 
 ```bash
-cd /home/devansh/rag-spring-ai
 ./gradlew bootRun
 ```
 
-The app runs on:
-- `http://localhost:8080`
+The application starts on `http://localhost:8080`.
 
-## 4) Ingest a document
+## API reference
 
-Endpoint:
+### 1) Ingest a document
+
+**Endpoint**
+
 - `POST /api/v1/documents/ingest`
 
-Supported file types:
-- PDF: `application/pdf`, `.pdf`
-- Text: `text/*`, `.txt`, `.md`, `.markdown`, `.csv`, `.log`
+**Example files**
 
-Example:
+The repository already includes `onboarding-guide.md`, which is useful for a first ingestion test.
+
+**Windows example**
+
+```powershell
+curl.exe -X POST "http://localhost:8080/api/v1/documents/ingest" -F "file=@onboarding-guide.md"
+```
+
+**macOS / Linux example**
 
 ```bash
 curl -X POST "http://localhost:8080/api/v1/documents/ingest" \
   -F "file=@onboarding-guide.md"
 ```
 
-PDF example:
-
-```bash
-curl -X POST "http://localhost:8080/api/v1/documents/ingest" \
-  -F "file=@sample.pdf"
-```
-
-Example response:
+**Example response**
 
 ```json
 {
-  "filename": "sample.pdf",
+  "filename": "onboarding-guide.md",
   "chunksIndexed": 12
 }
 ```
 
-Validation error response example:
+**Possible validation errors**
 
 ```json
 {
@@ -118,18 +175,26 @@ Validation error response example:
 }
 ```
 
-## 5) Ask a RAG question
+Other possible messages:
+- `Uploaded file is empty.`
+- `No readable content found in uploaded file.`
+- `No readable text found in PDF file.`
 
-Endpoint:
+### 2) Ask a strict RAG question
+
+This endpoint always runs with retrieval grounding.
+
+**Endpoint**
+
 - `POST /api/v1/chat/ask?question=...`
 
-Example:
+**Example**
 
-```bash
-curl -X POST "http://localhost:8080/api/v1/chat/ask?question=What%20is%20the%20onboarding%20process%3F"
+```powershell
+curl.exe -X POST "http://localhost:8080/api/v1/chat/ask?question=How%20much%20PTO%20do%20full-time%20employees%20receive%3F"
 ```
 
-Example response:
+**Example response**
 
 ```json
 {
@@ -137,53 +202,96 @@ Example response:
 }
 ```
 
-## Run tests
+### 3) Ask an agent-enabled question
+
+This endpoint can use tools, including knowledge-base search.
+
+**Endpoint**
+
+- `POST /api/v1/chat/agent?question=...`
+
+**Examples**
+
+Ask a knowledge-grounded question:
+
+```powershell
+curl.exe -X POST "http://localhost:8080/api/v1/chat/agent?question=What%20does%20the%20sample%20onboarding%20guide%20say%20about%20health%20benefits%3F"
+```
+
+Ask a tool-oriented question:
+
+```powershell
+curl.exe -X POST "http://localhost:8080/api/v1/chat/agent?question=How%20many%20business%20days%20are%20there%20between%202026-07-01%20and%202026-07-14%3F"
+```
+
+## Running tests
+
+The current `@SpringBootTest` loads the full application context, so make sure the Docker dependencies are running first. In particular, PostgreSQL must be available and the `ragdb` database must exist.
+
+On Windows:
+
+```powershell
+.\gradlew.bat test
+```
+
+On macOS / Linux:
 
 ```bash
-cd /home/devansh/rag-spring-ai
 ./gradlew test
 ```
 
 ## Troubleshooting
 
-### Ollama model load fails with `signal: killed`
+### Ollama model pull or load fails
 
-Cause: insufficient memory for selected model.
+This is often caused by insufficient memory or a model that is too large for the machine.
 
-Fixes:
-- Use smaller chat model (already set to `llama3.2:1b`).
-- Ensure Docker has enough memory.
-- Pull model explicitly:
+Try:
+- Keeping the configured chat model at `llama3.2:1b`
+- Ensuring Docker has enough memory
+- Pulling the models manually again
 
-```bash
-docker-compose exec -T ollama ollama pull llama3.2:1b
+```powershell
+docker compose exec -T ollama ollama pull llama3.2:1b
+docker compose exec -T ollama ollama pull nomic-embed-text
 ```
 
-### App fails at startup due to DB connection
+### Application fails to connect to PostgreSQL
 
-Ensure PG container is healthy:
+Verify that the `pgvector` container is healthy:
 
-```bash
-docker-compose ps
+```powershell
+docker compose ps
 ```
 
-You should see `pgvector` in `Up (healthy)` state.
+You should see the `pgvector` service in a healthy running state.
 
-### Ingestion request returns `400 Bad Request`
+If the database was removed or not initialized yet, recreate the container and start the stack again:
 
-The API returns clear validation messages for common upload issues:
-- `Uploaded file is empty.`
-- `Unsupported file type. Please upload a PDF or text file.`
-- `No readable content found in uploaded file.`
+```powershell
+docker compose down -v
+docker compose up -d
+```
 
-### Spring Docker Compose auto-management issues
+### Ingestion returns `400 Bad Request`
 
-This project keeps `spring.docker.compose.enabled: false` to avoid local CLI compatibility issues. Start/stop dependencies manually with Docker Compose.
+Common causes:
+- Empty upload
+- Unsupported file type
+- PDF with no extractable text
+- Text file with no readable content
+
+### Ollama is running but answers are poor or empty
+
+Check that:
+- You ingested at least one document first
+- The embedding model was pulled successfully
+- Ollama is reachable at `http://localhost:11434`
+- Your question actually relates to ingested content when using the strict RAG endpoint
 
 ## Stop services
 
-```bash
-cd /home/devansh/rag-spring-ai
-docker-compose down
+```powershell
+docker compose down
 ```
 

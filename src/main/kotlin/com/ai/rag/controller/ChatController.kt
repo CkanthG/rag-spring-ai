@@ -16,4 +16,9 @@ class ChatController(
     fun ask(@RequestParam question: String): Map<String, String> {
         return mapOf("answer" to ragService.ask(question))
     }
+
+    @PostMapping("/agent")
+    fun askAgent(@RequestParam question: String): Map<String, String> {
+        return mapOf("answer" to ragService.askAgent(question))
+    }
 }
